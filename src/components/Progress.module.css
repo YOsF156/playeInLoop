@@ -1,0 +1,8 @@
+.progress {
+  width: 400px;
+}
+
+.duration {
+  position: relative;
+  float: right;
+}
