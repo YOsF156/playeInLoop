@@ -135,70 +135,57 @@ export const usePlayer = () => {
       thisShifter._node.dispatchEvent(timePlayed);
     }
   };
+  let arr = []
   const newShifter = buffer => {
-    let bufferSize = 1024;
-    const myShifter = new PitchShifter(audioCtx, buffer, bufferSize, onEnd);
+    let bufferSize = 16384;
+    const myShifter = new PitchShifter(audioCtx, buffer, bufferSize);
     myShifter.tempo = tempo;
     myShifter.pitch = pitch;
     myShifter.on("play", onPlay);
-    function onEnd() {
-      // Reset position to the start without adding silence
-      myShifter._filter.sourcePosition = 0;
-      // myShifter._node.dispatchEvent(new Event('play')); // Trigger play event to restart playback
-    }
-    //const samples = new Float32Array(bufferSize * 2);
-    let donePlaying = false;
-    // myShifter._node.onaudioprocess = event => {
-    //   if (donePlaying) {
-    //     onEnd();
-    //     donePlaying = false;
-    //     return;
-    //   }
-    //   let left = event.outputBuffer.getChannelData(0);
-    //   let right = event.outputBuffer.getChannelData(1);
-    //   let remainingFrames = buffer.length - myShifter._filter.sourcePosition;
-    //   let framesToProcess = Math.min(bufferSize, remainingFrames);
-    //   let framesExtracted = myShifter._filter.extract(samples, framesToProcess);
-    //   onUpdateShifter(myShifter, myShifter._filter.sourcePosition);
-    //   if (framesExtracted < bufferSize) {
-    //     donePlaying = true;
-    //   }
-    //   let i = 0;
-    //   for (; i < framesExtracted; i++) {
-    //     left[i] = samples[i * 2];
-    //     right[i] = samples[i * 2 + 1];
-    //   }
-    // };
+    myShifter._node.onaudioprocess = function (event) {
+      let left = event.outputBuffer.getChannelData(0);
+      let right = event.outputBuffer.getChannelData(1);
+      let remainingFrames = buffer.length - myShifter._filter.sourcePosition;
+      let framesToProcess = Math.min(bufferSize, remainingFrames);
+      arr.push(myShifter._filter.sourcePosition)
+      console.log("🚀 ~ newShifter ~ arr:", arr)
 
+      let samples = new Float32Array(bufferSize * 2);
+      let framesExtracted = myShifter._filter.extract(samples, framesToProcess);
+      onUpdateShifter(myShifter, myShifter._filter.sourcePosition);
+      if (framesExtracted < bufferSize) {
+        //If we have less samples than buffer size, than collect the remaining from the begining of the audio
+        let framesRemaining = bufferSize - framesExtracted;
+        myShifter._filter.sourcePosition = 0;
+        arr = []
+        let extraSamples = new Float32Array(framesRemaining * 2);
+        myShifter._filter.extract(extraSamples, framesRemaining);
 
-    // myShifter._node.onaudioprocess = function (event) {
-    //   console.log("🚀 ~ newShifter ~ event:", event)
-    //   let left = event.outputBuffer.getChannelData(0);
-    //   let right = event.outputBuffer.getChannelData(1);
-    //   let remainingFrames = buffer.length - myShifter._filter.sourcePosition;
-    //   let framesToProcess = Math.min(bufferSize, remainingFrames);
+        // Copy the smaples of the end of audio
+        for (let i = 0; i < framesExtracted; i++) {
+          left[i] = samples[i * 2];
+          right[i] = samples[i * 2 + 1];
+        }
+        //Copy the samples from the begining of audio
+        for (let i = 0; i < framesRemaining; i++) {
+          left[framesExtracted + i] = extraSamples[i * 2];
+          right[framesExtracted + i] = extraSamples[i * 2 + 1];
+        }
+      } else {
+        // Normal processing
+        for (let i = 0; i < bufferSize; i++) {
+          left[i] = samples[i * 2];
+          right[i] = samples[i * 2 + 1];
+        }
+      }
+    };
 
-    //   // Extract frames to process
-    //   let framesExtracted = myShifter._filter.extract(new Float32Array(bufferSize * 2), framesToProcess);
-
-    //   // If we've reached the end of the buffer
-    //   if (framesExtracted < bufferSize) {
-    //     for (let i = 0; i < framesExtracted; i++) {
-    //       left[i] = myShifter._filter.outputBuffer.vector[i * 2];
-    //       right[i] = myShifter._filter.outputBuffer.vector[i * 2 + 1];
-    //     }
-    //     onEnd(); // Trigger the end of playback
-    //   } else {
-    //     for (let i = 0; i < bufferSize; i++) {
-    //       left[i] = myShifter._filter.outputBuffer.vector[i * 2];
-    //       right[i] = myShifter._filter.outputBuffer.vector[i * 2 + 1];
-    //     }
-    //   }
-    // };
     setDuration(myShifter.formattedDuration);
     setShifter(myShifter);
   };
-
+  useEffect(() => {
+    playAudio();
+  }, [shifter])
   const onPause = () => {
 
     console.log("🚀 ~ onPause ~ onPause:", onPause)
@@ -206,11 +193,12 @@ export const usePlayer = () => {
       setAudioComplete(true); // Use the state setter to update audioComplete
   };
 
-  const onLoad = ({ target: { result: buffer } }) => {
+  const onLoadFromFile = ({ target: { result: buffer } }) => {
     if (shifter) {
       shifter.off();
     }
     if (buffer) {
+      console.log("🚀 ~ onLoadFromFile ~ buffer:", buffer)
       audioCtx.decodeAudioData(buffer).then(audioBuffer => {
         newShifter(audioBuffer);
       });
@@ -221,11 +209,58 @@ export const usePlayer = () => {
   const loadFile = file => {
     setLoading(true);
     const fileReader = new FileReader();
-    fileReader.onload = onLoad;
+    fileReader.onload = onLoadFromFile;
     try {
       fileReader.readAsArrayBuffer(file);
     } catch (err) {
       alert(err);
+    }
+  };
+
+
+
+  const onLoad = (arrayBuffer) => {
+    console.log("🚀 ~ onLoad ~ arrayBuffer:", arrayBuffer)
+    if (shifter) {
+      shifter.off();
+    }
+    if (arrayBuffer) {
+      audioCtx.decodeAudioData(arrayBuffer)
+        .then(audioBuffer => {
+          newShifter(audioBuffer);
+          setLoading(false);
+
+
+        })
+        .catch(err => {
+          console.error('Error decoding audio data:', err);
+          alert('Error decoding audio data');
+          setLoading(false);
+        });
+    } else {
+      alert('Error: ArrayBuffer is null or undefined');
+      setLoading(false);
+    }
+  };
+
+  const loadFileFromAssets = async (filePath) => {
+    setLoading(true);
+    try {
+      fetch(filePath)
+        .then(response => {
+          return response.arrayBuffer()
+        })
+        .then(data => {
+          onLoad(data);
+        })
+        .catch(error => {
+          console.error('Error loading audio:', error);
+        });
+
+    } catch (err) {
+      console.error('Error fetching file:', err);
+      alert('Error fetching file');
+      setLoading(false);
     }
   };
 
@@ -298,6 +333,7 @@ export const usePlayer = () => {
     playHead,
     progress,
     loadFile,
+    loadFileFromAssets,
     play: playAudio,
     pause: pauseAudio,
     changeVolume: ({ target: { value } }) => {
